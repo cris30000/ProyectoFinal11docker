@@ -1,4 +1,4 @@
-# 🎓 University Management System
+# 🎓 Sistema de universidad
 
 Sistema de gestión universitaria completo con autenticación segura, gestión de usuarios, períodos académicos y calificaciones.
 
