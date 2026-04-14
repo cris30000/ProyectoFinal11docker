@@ -1,0 +1,178 @@
+"""
+Rate Limiting middleware simple sin dependencias externas.
+Protege la API contra ataques de fuerza bruta.
+"""
+
+from fastapi import Request, HTTPException
+from fastapi.responses import JSONResponse
+import time
+from collections import defaultdict
+from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
+
+# ============================================
+# LIMITADOR DE TASA SIMPLE
+# ============================================
+
+class RateLimiter:
+    """
+    Limitador de tasa simple sin dependencias externas.
+    """
+    
+    def __init__(self):
+        # Estructura: {ip: [timestamps]}
+        self.requests = defaultdict(list)
+        # Límites por endpoint
+        self.limits = {
+            "login": {"requests": 5, "window": 60},      # 5 intentos por minuto
+            "register": {"requests": 3, "window": 60},    # 3 registros por minuto
+            "change_password": {"requests": 3, "window": 300},  # 3 por 5 minutos
+            "default": {"requests": 100, "window": 60}    # 100 por minuto
+        }
+    
+    def _clean_old_requests(self, ip: str, window: int):
+        """Eliminar solicitudes antiguas fuera de la ventana de tiempo"""
+        current_time = time.time()
+        self.requests[ip] = [
+            req_time for req_time in self.requests[ip]
+            if current_time - req_time < window
+        ]
+    
+    def check_rate_limit(self, ip: str, endpoint: str = "default") -> tuple:
+        """
+        Verificar si la IP ha excedido el límite.
+        Retorna: (allowed, info)
+        """
+        # Obtener límites para el endpoint
+        limits = self.limits.get(endpoint, self.limits["default"])
+        max_requests = limits["requests"]
+        window = limits["window"]
+        
+        # Limpiar solicitudes antiguas
+        self._clean_old_requests(ip, window)
+        
+        # Verificar si excede el límite
+        current_count = len(self.requests[ip])
+        allowed = current_count < max_requests
+        
+        # Calcular tiempo de espera si está bloqueado
+        wait_time = 0
+        if not allowed and self.requests[ip]:
+            oldest = min(self.requests[ip])
+            wait_time = int(window - (time.time() - oldest))
+            wait_time = max(wait_time, 1)
+        
+        info = {
+            "limit": max_requests,
+            "remaining": max_requests - current_count if allowed else 0,
+            "window": window,
+            "wait_time": wait_time if not allowed else 0,
+            "reset_time": int(time.time() + wait_time) if not allowed else 0
+        }
+        
+        return allowed, info
+    
+    def add_request(self, ip: str, endpoint: str = "default"):
+        """Registrar una nueva solicitud para la IP"""
+        limits = self.limits.get(endpoint, self.limits["default"])
+        window = limits["window"]
+        
+        self._clean_old_requests(ip, window)
+        self.requests[ip].append(time.time())
+    
+    def get_stats(self, ip: str = None):
+        """Obtener estadísticas de rate limiting"""
+        if ip:
+            return {
+                "ip": ip,
+                "requests": len(self.requests[ip]),
+                "active_ips": len(self.requests)
+            }
+        return {
+            "total_ips": len(self.requests),
+            "total_requests": sum(len(reqs) for reqs in self.requests.values())
+        }
+
+# Instancia global
+rate_limiter = RateLimiter()
+
+# ============================================
+# MIDDLEWARE PERSONALIZADO
+# ============================================
+
+class RateLimitMiddleware:
+    """
+    Middleware para aplicar rate limiting a todas las rutas.
+    """
+    
+    def __init__(self, app):
+        self.app = app
+    
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        
+        # Obtener IP del cliente
+        request = Request(scope, receive)
+        client_ip = request.client.host if request.client else "unknown"
+        
+        # Determinar endpoint para rate limiting
+        path = request.url.path
+        endpoint = "default"
+        
+        if "/auth/login" in path:
+            endpoint = "login"
+        elif "/auth/register" in path:
+            endpoint = "register"
+        elif "/auth/change-password" in path:
+            endpoint = "change_password"
+        
+        # Verificar rate limit
+        allowed, info = rate_limiter.check_rate_limit(client_ip, endpoint)
+        
+        if not allowed:
+            # Retornar error 429 Too Many Requests
+            response = JSONResponse(
+                status_code=429,
+                content={
+                    "detail": f"Demasiadas solicitudes. Límite: {info['limit']} por {info['window']} segundos. Espera {info['wait_time']} segundos.",
+                    "wait_time": info["wait_time"],
+                    "limit": info["limit"],
+                    "window": info["window"]
+                },
+                headers={
+                    "X-RateLimit-Limit": str(info["limit"]),
+                    "X-RateLimit-Remaining": str(info["remaining"]),
+                    "X-RateLimit-Reset": str(info["reset_time"]),
+                    "Retry-After": str(info["wait_time"])
+                }
+            )
+            await response(scope, receive, send)
+            return
+        
+        # Registrar solicitud
+        rate_limiter.add_request(client_ip, endpoint)
+        
+        # Continuar con la solicitud
+        await self.app(scope, receive, send)
+
+# ============================================
+# FUNCIONES DE UTILIDAD
+# ============================================
+
+def get_rate_limit_headers(info: dict) -> dict:
+    """Generar headers HTTP para rate limiting"""
+    return {
+        "X-RateLimit-Limit": str(info["limit"]),
+        "X-RateLimit-Remaining": str(info["remaining"]),
+        "X-RateLimit-Reset": str(info["reset_time"]),
+        "Retry-After": str(info["wait_time"]) if info["wait_time"] > 0 else "0"
+    }
+
+# Para compatibilidad con código que espera slowapi
+limiter = rate_limiter
+RateLimitExceeded = HTTPException
+_rate_limit_exceeded_handler = None
