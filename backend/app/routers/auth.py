@@ -16,23 +16,32 @@ async def login(login_data: LoginRequest):
     # Buscar usuario por username
     response = supabase.table("users").select("*").eq("username", login_data.username).execute()
     
+    # ============================================
+    # CASO 1: USUARIO NO EXISTE
+    # ============================================
     if not response.data:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Usuario o contraseña incorrectos"
+            detail="❌ Usuario no encontrado. Verifica tu nombre de usuario."
         )
     
     user = response.data[0]
     stored_password = user.get("hashed_password", "")
+    
+    # ============================================
+    # CASO 2: VERIFICAR CONTRASEÑA
+    # ============================================
     
     # Verificar si es un hash bcrypt (comienza con $2b$)
     if stored_password.startswith('$2b$'):
         # Es un hash bcrypt - verificar
         try:
             if bcrypt.checkpw(login_data.password.encode('utf-8'), stored_password.encode('utf-8')):
-                # Login exitoso
+                # ============================================
+                # CASO 3: LOGIN EXITOSO
+                # ============================================
                 return {
-                    "message": f"Bienvenido {user['full_name']}",
+                    "message": f"✅ Bienvenido {user['full_name']}",
                     "user": {
                         "id": user["id"],
                         "username": user["username"],
@@ -42,10 +51,17 @@ async def login(login_data: LoginRequest):
                     }
                 }
             else:
-                raise HTTPException(status_code=401, detail="Usuario o contraseña incorrectos")
+                # Contraseña incorrecta
+                raise HTTPException(
+                    status_code=401, 
+                    detail="❌ Contraseña incorrecta. Por favor, inténtalo de nuevo."
+                )
         except Exception as e:
             print(f"Error verificando bcrypt: {e}")
-            raise HTTPException(status_code=401, detail="Usuario o contraseña incorrectos")
+            raise HTTPException(
+                status_code=401, 
+                detail="❌ Error al verificar la contraseña. Contacta al administrador."
+            )
     else:
         # Es texto plano - intentar convertir a hash automáticamente
         try:
@@ -61,7 +77,7 @@ async def login(login_data: LoginRequest):
                 print(f"✅ Contraseña de {user['username']} convertida a hash bcrypt")
                 
                 return {
-                    "message": f"Bienvenido {user['full_name']}",
+                    "message": f"✅ Bienvenido {user['full_name']}",
                     "user": {
                         "id": user["id"],
                         "username": user["username"],
@@ -71,6 +87,13 @@ async def login(login_data: LoginRequest):
                     }
                 }
             else:
-                raise HTTPException(status_code=401, detail="Usuario o contraseña incorrectos")
+                # Contraseña incorrecta
+                raise HTTPException(
+                    status_code=401, 
+                    detail="❌ Contraseña incorrecta. Por favor, inténtalo de nuevo."
+                )
         except:
-            raise HTTPException(status_code=401, detail="Usuario o contraseña incorrectos")
+            raise HTTPException(
+                status_code=401, 
+                detail="❌ Error al verificar la contraseña. Contacta al administrador."
+            )

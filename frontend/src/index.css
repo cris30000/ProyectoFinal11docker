@@ -2,13 +2,24 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Estilos personalizados adicionales (opcionales) */
+/* Estilos base */
 @layer base {
+  html {
+    font-size: 16px;
+  }
+  
+  @media (max-width: 768px) {
+    html {
+      font-size: 14px;
+    }
+  }
+  
   body {
     @apply m-0 bg-gray-50;
   }
 }
 
+/* Componentes reutilizables */
 @layer components {
   .btn-primary {
     @apply bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors;
@@ -20,5 +31,19 @@
   
   .card {
     @apply bg-white rounded-lg shadow-md p-6;
+  }
+  
+  /* Clases responsive */
+  .container-responsive {
+    @apply w-full px-4 mx-auto;
+    max-width: 1280px;
+  }
+  
+  .card-responsive {
+    @apply bg-white rounded-lg shadow-md p-4 md:p-6;
+  }
+  
+  .grid-responsive {
+    @apply grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4;
   }
 }

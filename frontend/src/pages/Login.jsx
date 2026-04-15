@@ -63,7 +63,7 @@ const Login = () => {
             
             <div>
               <label htmlFor="password" className="block text-sm font-medium text-gray-700">
-                Contraseña
+                Password
               </label>
               <input
                 id="password"
@@ -88,13 +88,7 @@ const Login = () => {
             </button>
           </div>
         </form>
-
-        <div className="text-center text-sm text-gray-500">
-          <p>Usuarios de prueba:</p>
-          <p>admin / admin123</p>
-          <p>teacher / teacher123</p>
-          <p>student / student123</p>
-        </div>
+       
       </div>
     </div>
   );

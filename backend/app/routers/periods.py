@@ -1,16 +1,38 @@
 from fastapi import APIRouter, HTTPException, status
 from app.database import get_supabase
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 from datetime import datetime
 from typing import Optional
 
 router = APIRouter()
 
-# Modelo para crear período
+# Modelo para crear período con validaciones
 class PeriodCreate(BaseModel):
     name: str
     start_date: datetime
     end_date: datetime
+    
+    # Validar que la fecha de inicio no sea pasada
+    @validator('start_date')
+    def validate_start_date(cls, v):
+        now = datetime.now()
+        # Comparar solo fechas (sin horas)
+        if v.date() < now.date():
+            raise ValueError(f"❌ La fecha de inicio no puede ser anterior a hoy ({now.strftime('%d/%m/%Y')})")
+        return v
+    
+    # Validar que la fecha de fin sea posterior a la de inicio
+    @validator('end_date')
+    def validate_end_date(cls, v, values):
+        if 'start_date' in values:
+            if v <= values['start_date']:
+                raise ValueError("❌ La fecha de fin debe ser posterior a la fecha de inicio")
+        
+        # Validar que no sea una fecha muy lejana (opcional, 10 años máximo)
+        max_date = datetime.now().replace(year=datetime.now().year + 10)
+        if v > max_date:
+            raise ValueError(f"❌ La fecha de fin no puede ser más de 10 años en el futuro (máximo {max_date.strftime('%d/%m/%Y')})")
+        return v
 
 # Modelo para actualizar período
 class PeriodUpdate(BaseModel):
@@ -55,17 +77,25 @@ async def get_period(period_id: int):
 
 @router.post("/")
 async def create_period(period: PeriodCreate):
-    """Crear un nuevo período académico"""
+    """Crear un nuevo período académico (solo fechas actuales o futuras)"""
     supabase = get_supabase()
     
     # Verificar si ya existe un período con el mismo nombre
     existing = supabase.table("periods").select("*").eq("name", period.name).execute()
     if existing.data:
-        raise HTTPException(status_code=400, detail="Ya existe un período con ese nombre")
+        raise HTTPException(status_code=400, detail="❌ Ya existe un período con ese nombre")
     
     # Verificar que start_date sea menor que end_date
     if period.start_date >= period.end_date:
-        raise HTTPException(status_code=400, detail="La fecha de inicio debe ser menor a la fecha de fin")
+        raise HTTPException(status_code=400, detail="❌ La fecha de inicio debe ser menor a la fecha de fin")
+    
+    # Verificar que la fecha de inicio no sea pasada
+    now = datetime.now()
+    if period.start_date.date() < now.date():
+        raise HTTPException(
+            status_code=400, 
+            detail=f"❌ No se pueden crear períodos con fecha de inicio anterior a hoy ({now.strftime('%d/%m/%Y')})"
+        )
     
     new_period = {
         "name": period.name,
@@ -76,7 +106,10 @@ async def create_period(period: PeriodCreate):
     
     try:
         response = supabase.table("periods").insert(new_period).execute()
-        return {"message": "Período creado exitosamente", "period": response.data[0]}
+        return {
+            "message": "✅ Período creado exitosamente",
+            "period": response.data[0]
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
@@ -93,10 +126,27 @@ async def update_period(period_id: int, period: PeriodUpdate):
     # Preparar datos a actualizar
     update_data = {k: v for k, v in period.dict().items() if v is not None}
     
-    # Convertir fechas a ISO si están presentes
+    # Validar fechas si se están actualizando
     if "start_date" in update_data:
+        # Verificar que la nueva fecha de inicio no sea pasada
+        if update_data["start_date"].date() < datetime.now().date():
+            raise HTTPException(
+                status_code=400, 
+                detail="❌ No se puede actualizar la fecha de inicio a una fecha pasada"
+            )
         update_data["start_date"] = update_data["start_date"].isoformat()
+    
     if "end_date" in update_data:
+        # Si también se actualiza start_date, validar que end_date sea posterior
+        if "start_date" in update_data:
+            start = update_data["start_date"]
+            if isinstance(start, str):
+                start = datetime.fromisoformat(start)
+            if update_data["end_date"] <= start:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="❌ La fecha de fin debe ser posterior a la fecha de inicio"
+                )
         update_data["end_date"] = update_data["end_date"].isoformat()
     
     if not update_data:
@@ -104,7 +154,7 @@ async def update_period(period_id: int, period: PeriodUpdate):
     
     try:
         response = supabase.table("periods").update(update_data).eq("id", period_id).execute()
-        return {"message": "Período actualizado exitosamente", "period": response.data[0]}
+        return {"message": "✅ Período actualizado exitosamente", "period": response.data[0]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
@@ -121,10 +171,10 @@ async def delete_period(period_id: int):
     # Verificar si hay calificaciones asociadas
     grades = supabase.table("grades").select("*").eq("period_id", period_id).execute()
     if grades.data:
-        raise HTTPException(status_code=400, detail="No se puede eliminar el período porque tiene calificaciones asociadas")
+        raise HTTPException(status_code=400, detail="❌ No se puede eliminar el período porque tiene calificaciones asociadas")
     
     try:
         supabase.table("periods").delete().eq("id", period_id).execute()
-        return {"message": "Período eliminado exitosamente"}
+        return {"message": "✅ Período eliminado exitosamente"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")

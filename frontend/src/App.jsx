@@ -8,7 +8,7 @@ import Users from './pages/Users';
 import Periods from './pages/Periods';
 import Grades from './pages/Grades';
 import StudentGrades from './pages/StudentGrades';  // ✅ IMPORTAR
-
+import NotFound from './pages/NotFound';  // ✅ IMPORTAR
 function App() {
   return (
     <AuthProvider>
@@ -23,6 +23,7 @@ function App() {
             <Route path="grades" element={<Grades />} />
             <Route path="my-grades" element={<StudentGrades />} />  {/* ✅ AGREGAR ESTA LÍNEA */}
           </Route>
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </Router>
     </AuthProvider>
